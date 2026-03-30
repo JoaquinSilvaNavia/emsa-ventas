@@ -79,6 +79,12 @@ main{padding:20px 24px 48px;max-width:1060px}
 .spinner{width:26px;height:26px;border:2px solid var(--bdr2);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+.cat-sel{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.cat-btn{padding:5px 14px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--bdr2);border-radius:20px;background:none;transition:all .15s;color:var(--muted)}
+.cat-btn:hover{color:var(--text)}
+.cat-btn.on{font-weight:600;border-width:2px}
+
+
 @media(max-width:700px){
   header,main,.top-tabs,.view-tabs{padding-left:16px;padding-right:16px}
   .kpis{grid-template-columns:1fr 1fr}
@@ -103,6 +109,7 @@ main{padding:20px 24px 48px;max-width:1060px}
 <div class="view-tabs">
   <button class="view-tab on" onclick="setV('total',this)">Total consolidado</button>
   <button class="view-tab"    onclick="setV('cats',this)">Por categoría</button>
+  <button class="view-tab"    onclick="setV('comp',this)">Comparativo anual ↕</button>
 </div>
 
 <main id="mc">
@@ -335,9 +342,138 @@ function renderCats() {
 }
 
 // ── NAVEGACIÓN ────────────────────────────────────────────────
-function render() { if(aV==="total") renderTotal(); else renderCats(); }
+function render() { if(aV==="total") renderTotal(); else if(aV==="cats") renderCats(); else renderComp(); }
 function setM(m,b){ aM=m; document.querySelectorAll(".top-tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); render(); }
 function setV(v,b){ aV=v; document.querySelectorAll(".view-tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); render(); }
+
+
+// ── RENDER COMPARATIVO ANUAL ──────────────────────────────────
+let selCat = "Gaseosas";
+
+function renderComp() {
+  const bpc = byPeriodCat();
+  const unit = isV() ? "M$" : "kL";
+
+  // Meses disponibles en cualquier año
+  const allMeses = [...new Set(
+    Object.keys(bpc).map(p => mm(p))
+  )].sort();
+
+  // Datos por mes para cada año
+  const years = [...new Set(Object.keys(bpc).map(p => p.slice(0,4)))].sort();
+
+  // Selector de categoría
+  const selHTML = CATS.map(c =>
+    `<button class="cat-btn${c.k===selCat?" on":""}" 
+      style="${c.k===selCat?"color:"+c.c+";border-color:"+c.c:""}
+      onclick="selCat='${c.k}';renderComp()">${c.k}</button>`
+  ).join("");
+
+  // Datasets: una barra por año
+  const yearColors = { "2025":"rgba(255,255,255,.2)", "2026":"#3b8fd4" };
+  const datasets = years.map(yr => ({
+    label: yr,
+    data: allMeses.map(m => {
+      const p = yr+"-"+m;
+      return toC(bpc[p]?.[selCat] || 0);
+    }),
+    backgroundColor: yearColors[yr] || "#9b6dd4",
+    borderRadius: 5,
+    barPercentage: .55,
+    categoryPercentage: .7
+  }));
+
+  // Variación mes a mes (2026 vs 2025)
+  const varRow = allMeses.map(m => {
+    const v26 = bpc["2026-"+m]?.[selCat] || 0;
+    const v25 = bpc["2025-"+m]?.[selCat] || 0;
+    const d = pct(v26, v25);
+    return d !== null
+      ? `<td class="${dc(d)}">${sign(d)}${d.toFixed(1)}%</td>`
+      : `<td class="neu">—</td>`;
+  }).join("");
+
+  // Fila de valores por año
+  const dataRows = years.map(yr => {
+    const celdas = allMeses.map(m => {
+      const v = bpc[yr+"-"+m]?.[selCat] || 0;
+      return `<td>${fmt(v)}</td>`;
+    }).join("");
+    return `<tr><td><b>${yr}</b></td>${celdas}</tr>`;
+  }).join("");
+
+  // Totales YTD (meses comunes 2025 y 2026)
+  const mos26 = [...new Set(Object.keys(bpc).filter(p=>p.startsWith("2026")).map(p=>mm(p)))];
+  const ytd26 = mos26.reduce((s,m) => s+(bpc["2026-"+m]?.[selCat]||0), 0);
+  const ytd25 = mos26.reduce((s,m) => s+(bpc["2025-"+m]?.[selCat]||0), 0);
+  const dYTD  = pct(ytd26, ytd25);
+
+  const cat = CATS.find(c=>c.k===selCat);
+  const thMeses = allMeses.map(m=>`<th>${MM[m]}</th>`).join("");
+
+  document.getElementById("mc").innerHTML =
+  `<div class="cat-sel">${selHTML}</div>
+  <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    <div class="kpi">
+      <div class="kpi-l">YTD 2026</div>
+      <div class="kpi-v">${fmt(ytd26)}</div>
+      <div class="kpi-d ${dc(dYTD)}">${dYTD!==null?sign(dYTD)+dYTD.toFixed(1)+"% vs 2025":"—"}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-l">YTD 2025</div>
+      <div class="kpi-v">${fmt(ytd25)}</div>
+      <div class="kpi-d neu">mismo período</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-l">Mejor mes 2026</div>
+      ${(()=>{
+        const best = allMeses.reduce((b,m)=>{
+          const v=bpc["2026-"+m]?.[selCat]||0; return v>b.v?{m,v}:b;
+        },{m:null,v:-Infinity});
+        return `<div class="kpi-v">${best.m?MM[best.m]:"—"}</div><div class="kpi-d neu">${best.v>0?fmt(best.v):"—"}</div>`;
+      })()}
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch">
+      <div>
+        <div class="ct" style="color:${cat.c}">${selCat} — 2025 vs 2026</div>
+        <div class="cs">Barras por mes · ${isV()?"Ventas M$":"Litros"} · comparativo año anterior</div>
+      </div>
+      <div class="leg">
+        <span class="li"><span class="ll" style="background:rgba(255,255,255,.2)"></span>2025</span>
+        <span class="li"><span class="ll" style="background:#3b8fd4"></span>2026</span>
+      </div>
+    </div>
+    <div class="cw" style="height:280px"><canvas id="cComp2"></canvas></div>
+  </div>
+  <div class="tbl" style="overflow-x:auto"><table>
+    <thead><tr><th>Año</th>${thMeses}</tr></thead>
+    <tbody>
+      ${dataRows}
+      <tr style="border-top:1px solid var(--bdr2)">
+        <td style="color:var(--muted);font-size:11px">Var.</td>${varRow}
+      </tr>
+    </tbody>
+  </table></div>`;
+
+  killCharts();
+  cA = new Chart(document.getElementById("cComp2"), {
+    type: "bar",
+    data: { labels: allMeses.map(m=>MM[m]), datasets },
+    options: {
+      ...cOpts(unit),
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor:"#1a1d27",borderColor:"rgba(255,255,255,.1)",borderWidth:1,
+          titleColor:"#e8eaf0",bodyColor:"#7a7f94",padding:10,
+          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString("es-CL")} ${unit}` }
+        }
+      }
+    }
+  });
+}
 
 // ── INIT ──────────────────────────────────────────────────────
 async function init() {

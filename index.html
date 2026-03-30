@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EMSA — Ventas & Producción</title>
+<!--
+  EMSA — Dashboard Ventas & Producción
+  Datos: QWERY_VENTAS.xlsx · 202501–202603
+  Mapeo SQL → Dashboard:
+    GASEOSA + BEB.REFRES.          → Gaseosas
+    A.PURIFICADA (≥6L)             → Bidones
+    A.PURIFICADA (<6L) + A.MINERAL → Agua Purificada
+    A.SABORIZADA                   → Aguas Saborizadas
+    ISOTONICA                      → Isotónica
+  Métrica ventas : Neto_Afecto (pesos)
+  Métrica litros : Lts.por Unidad × unidades
+  ⚠ Feb–Mar 2026: mes incompleto en el Excel fuente
+  ⚠ Mar 2025 Bidones: litros negativos por notas de crédito
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:    #0d0f14; --bg2: #13161e; --bg3: #1a1d27;
+  --bdr:   rgba(255,255,255,0.07); --bdr2: rgba(255,255,255,0.13);
+  --text:  #e8eaf0; --muted: #7a7f94;
+  --acc:   #2e74b5; --grn: #1d9e75; --red: #c94a4a; --amb: #d4890f;
+  --font:  'DM Sans',system-ui,sans-serif;
+  --mono:  'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;min-height:100vh}
+
+header{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--bdr);position:sticky;top:0;background:var(--bg);z-index:100}
+.badge{background:var(--acc);color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;letter-spacing:.5px}
+.htitle{font-size:15px;font-weight:500;margin-left:10px}
+.hsub{font-size:11px;color:var(--muted);margin-left:10px;margin-top:1px}
+.dtag{font-size:10px;color:var(--muted);background:var(--bg3);border:1px solid var(--bdr2);padding:3px 8px;border-radius:4px}
+
+.top-tabs{display:flex;gap:2px;padding:0 24px;border-bottom:1px solid var(--bdr)}
+.top-tab{padding:10px 20px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+.top-tab:hover{color:var(--text)} .top-tab.on{color:var(--text);border-bottom-color:var(--acc)}
+
+.view-tabs{display:flex;gap:8px;padding:18px 24px 0}
+.view-tab{padding:5px 14px;font-size:12px;font-weight:500;color:var(--muted);cursor:pointer;border:1px solid var(--bdr2);border-radius:20px;background:none;transition:all .15s}
+.view-tab:hover{color:var(--text)} .view-tab.on{color:var(--bg);background:var(--text);border-color:var(--text)}
+
+main{padding:20px 24px 48px;max-width:1060px}
+
+.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-bottom:18px}
+.kpi{background:var(--bg2);border:1px solid var(--bdr);border-radius:10px;padding:12px 14px}
+.kpi-l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px}
+.kpi-v{font-size:16px;font-weight:600;font-family:var(--mono);letter-spacing:-.5px}
+.kpi-d{font-size:11px;margin-top:3px;font-family:var(--mono)}
+.pos{color:var(--grn)} .neg{color:var(--red)} .neu{color:var(--muted)}
+
+.card{background:var(--bg2);border:1px solid var(--bdr);border-radius:10px;padding:20px 22px;margin-bottom:14px}
+.ch{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:10px}
+.ct{font-size:14px;font-weight:500} .cs{font-size:11px;color:var(--muted);margin-top:2px}
+.leg{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.li{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);white-space:nowrap}
+.ll{width:16px;height:2px;border-radius:1px;flex-shrink:0}
+.cw{position:relative;width:100%;height:260px}
+
+.note{background:rgba(212,137,15,.08);border:1px solid rgba(212,137,15,.25);border-radius:8px;padding:9px 13px;font-size:11px;color:var(--amb);margin-bottom:14px;line-height:1.6}
+
+.tbl{background:var(--bg2);border:1px solid var(--bdr);border-radius:10px;overflow:hidden}
+.tbl table{width:100%;border-collapse:collapse;font-size:12px}
+.tbl thead th{padding:9px 13px;text-align:right;font-size:10px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;background:var(--bg3);border-bottom:1px solid var(--bdr)}
+.tbl thead th:first-child{text-align:left}
+.tbl tbody td{padding:8px 13px;border-bottom:1px solid var(--bdr);color:var(--text);text-align:right;font-family:var(--mono);font-size:11px}
+.tbl tbody td:first-child{text-align:left;font-family:var(--font);font-size:12px}
+.tbl tbody tr:last-child td{border-bottom:none}
+.tbl tbody tr:hover td{background:rgba(255,255,255,.02)}
+.cdot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
+.dim{opacity:.45;font-style:italic}
+
+@media(max-width:700px){
+  header,main,.top-tabs,.view-tabs{padding-left:16px;padding-right:16px}
+  .kpis{grid-template-columns:1fr 1fr}
+  .kpi-v{font-size:14px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center">
+    <span class="badge">EMSA</span>
+    <div><span class="htitle">Ventas &amp; Producción</span><div class="hsub">Evolución mensual · 202501–202603</div></div>
+  </div>
+  <span class="dtag">Libro de Venta x Producto</span>
+</header>
+
+<div class="top-tabs">
+  <button class="top-tab on" onclick="setM('ventas',this)">Ventas (M$)</button>
+  <button class="top-tab"    onclick="setM('prod',this)">Producción (Litros)</button>
+</div>
+<div class="view-tabs">
+  <button class="view-tab on" onclick="setV('total',this)">Total consolidado</button>
+  <button class="view-tab"    onclick="setV('cats',this)">Por categoría</button>
+</div>
+
+<main id="mc"></main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ── DATOS REALES ─────────────────────────────────────────────
+const rawV=[
+  {P:"2025-01",C:"Gaseosas",V:1237470830},{P:"2025-01",C:"Bidones",V:249881608},{P:"2025-01",C:"Agua Purificada",V:278045016},{P:"2025-01",C:"Aguas Saborizadas",V:38299857},{P:"2025-01",C:"Isotónica",V:27463295},
+  {P:"2025-02",C:"Gaseosas",V:1102523892},{P:"2025-02",C:"Bidones",V:244359916},{P:"2025-02",C:"Agua Purificada",V:251500665},{P:"2025-02",C:"Aguas Saborizadas",V:45955918},{P:"2025-02",C:"Isotónica",V:28604772},
+  {P:"2025-03",C:"Gaseosas",V:853886158},{P:"2025-03",C:"Bidones",V:-40559499},{P:"2025-03",C:"Agua Purificada",V:30056980},{P:"2025-03",C:"Aguas Saborizadas",V:29166551},{P:"2025-03",C:"Isotónica",V:48663350},
+  {P:"2025-04",C:"Gaseosas",V:626061491},{P:"2025-04",C:"Bidones",V:164012861},{P:"2025-04",C:"Agua Purificada",V:40569576},{P:"2025-04",C:"Aguas Saborizadas",V:24243978},{P:"2025-04",C:"Isotónica",V:20800467},
+  {P:"2025-05",C:"Gaseosas",V:699188470},{P:"2025-05",C:"Bidones",V:140355265},{P:"2025-05",C:"Agua Purificada",V:56922810},{P:"2025-05",C:"Aguas Saborizadas",V:30367769},{P:"2025-05",C:"Isotónica",V:7624700},
+  {P:"2025-06",C:"Gaseosas",V:439192116},{P:"2025-06",C:"Bidones",V:67074136},{P:"2025-06",C:"Agua Purificada",V:8053266},{P:"2025-06",C:"Aguas Saborizadas",V:3679954},{P:"2025-06",C:"Isotónica",V:4755483},
+  {P:"2025-07",C:"Gaseosas",V:516160146},{P:"2025-07",C:"Bidones",V:78217107},{P:"2025-07",C:"Agua Purificada",V:45800093},{P:"2025-07",C:"Aguas Saborizadas",V:20617212},{P:"2025-07",C:"Isotónica",V:1541752},
+  {P:"2025-08",C:"Gaseosas",V:543060309},{P:"2025-08",C:"Bidones",V:66348327},{P:"2025-08",C:"Agua Purificada",V:90828733},{P:"2025-08",C:"Aguas Saborizadas",V:22690158},{P:"2025-08",C:"Isotónica",V:5630441},
+  {P:"2025-09",C:"Gaseosas",V:600423322},{P:"2025-09",C:"Bidones",V:55674561},{P:"2025-09",C:"Agua Purificada",V:31395999},{P:"2025-09",C:"Aguas Saborizadas",V:6220790},{P:"2025-09",C:"Isotónica",V:19365979},
+  {P:"2025-10",C:"Gaseosas",V:648296095},{P:"2025-10",C:"Bidones",V:52812049},{P:"2025-10",C:"Agua Purificada",V:70681436},{P:"2025-10",C:"Aguas Saborizadas",V:21956666},{P:"2025-10",C:"Isotónica",V:11181527},
+  {P:"2025-11",C:"Gaseosas",V:691727250},{P:"2025-11",C:"Bidones",V:81878448},{P:"2025-11",C:"Agua Purificada",V:76651089},{P:"2025-11",C:"Aguas Saborizadas",V:31557143},{P:"2025-11",C:"Isotónica",V:3630379},
+  {P:"2025-12",C:"Gaseosas",V:511255081},{P:"2025-12",C:"Bidones",V:56808043},{P:"2025-12",C:"Agua Purificada",V:60302828},{P:"2025-12",C:"Aguas Saborizadas",V:16393000},{P:"2025-12",C:"Isotónica",V:9822669},
+  {P:"2026-01",C:"Gaseosas",V:105032432},{P:"2026-01",C:"Bidones",V:107275519},{P:"2026-01",C:"Agua Purificada",V:49628006},{P:"2026-01",C:"Aguas Saborizadas",V:29451242},{P:"2026-01",C:"Isotónica",V:2680685},
+  {P:"2026-02",C:"Gaseosas",V:8321310},{P:"2026-02",C:"Bidones",V:7292127},{P:"2026-02",C:"Agua Purificada",V:68532},{P:"2026-02",C:"Aguas Saborizadas",V:112494},{P:"2026-02",C:"Isotónica",V:0},
+  {P:"2026-03",C:"Gaseosas",V:186608135},{P:"2026-03",C:"Bidones",V:97472999},{P:"2026-03",C:"Agua Purificada",V:0},{P:"2026-03",C:"Aguas Saborizadas",V:2199092},{P:"2026-03",C:"Isotónica",V:0}
+];
+const rawP=[
+  {P:"2025-01",C:"Gaseosas",V:1031210},{P:"2025-01",C:"Bidones",V:588540},{P:"2025-01",C:"Agua Purificada",V:198254},{P:"2025-01",C:"Aguas Saborizadas",V:18195},{P:"2025-01",C:"Isotónica",V:8014},
+  {P:"2025-02",C:"Gaseosas",V:947060},{P:"2025-02",C:"Bidones",V:578544},{P:"2025-02",C:"Agua Purificada",V:162484},{P:"2025-02",C:"Aguas Saborizadas",V:19026},{P:"2025-02",C:"Isotónica",V:8512},
+  {P:"2025-03",C:"Gaseosas",V:599054},{P:"2025-03",C:"Bidones",V:-92802},{P:"2025-03",C:"Agua Purificada",V:45766},{P:"2025-03",C:"Aguas Saborizadas",V:6370},{P:"2025-03",C:"Isotónica",V:18667},
+  {P:"2025-04",C:"Gaseosas",V:498242},{P:"2025-04",C:"Bidones",V:381498},{P:"2025-04",C:"Agua Purificada",V:34453},{P:"2025-04",C:"Aguas Saborizadas",V:6959},{P:"2025-04",C:"Isotónica",V:7588},
+  {P:"2025-05",C:"Gaseosas",V:535464},{P:"2025-05",C:"Bidones",V:332034},{P:"2025-05",C:"Agua Purificada",V:46224},{P:"2025-05",C:"Aguas Saborizadas",V:13465},{P:"2025-05",C:"Isotónica",V:2026},
+  {P:"2025-06",C:"Gaseosas",V:294760},{P:"2025-06",C:"Bidones",V:159264},{P:"2025-06",C:"Agua Purificada",V:8894},{P:"2025-06",C:"Aguas Saborizadas",V:1118},{P:"2025-06",C:"Isotónica",V:1268},
+  {P:"2025-07",C:"Gaseosas",V:365945},{P:"2025-07",C:"Bidones",V:184404},{P:"2025-07",C:"Agua Purificada",V:49786},{P:"2025-07",C:"Aguas Saborizadas",V:10446},{P:"2025-07",C:"Isotónica",V:542},
+  {P:"2025-08",C:"Gaseosas",V:411972},{P:"2025-08",C:"Bidones",V:156966},{P:"2025-08",C:"Agua Purificada",V:62232},{P:"2025-08",C:"Aguas Saborizadas",V:11053},{P:"2025-08",C:"Isotónica",V:1594},
+  {P:"2025-09",C:"Gaseosas",V:434896},{P:"2025-09",C:"Bidones",V:131418},{P:"2025-09",C:"Agua Purificada",V:35260},{P:"2025-09",C:"Aguas Saborizadas",V:3155},{P:"2025-09",C:"Isotónica",V:5934},
+  {P:"2025-10",C:"Gaseosas",V:467252},{P:"2025-10",C:"Bidones",V:127680},{P:"2025-10",C:"Agua Purificada",V:80369},{P:"2025-10",C:"Aguas Saborizadas",V:3463},{P:"2025-10",C:"Isotónica",V:3369},
+  {P:"2025-11",C:"Gaseosas",V:527345},{P:"2025-11",C:"Bidones",V:207300},{P:"2025-11",C:"Agua Purificada",V:77638},{P:"2025-11",C:"Aguas Saborizadas",V:12711},{P:"2025-11",C:"Isotónica",V:1121},
+  {P:"2025-12",C:"Gaseosas",V:383654},{P:"2025-12",C:"Bidones",V:137196},{P:"2025-12",C:"Agua Purificada",V:71211},{P:"2025-12",C:"Aguas Saborizadas",V:8136},{P:"2025-12",C:"Isotónica",V:3110},
+  {P:"2026-01",C:"Gaseosas",V:72507},{P:"2026-01",C:"Bidones",V:263004},{P:"2026-01",C:"Agua Purificada",V:31849},{P:"2026-01",C:"Aguas Saborizadas",V:14657},{P:"2026-01",C:"Isotónica",V:972},
+  {P:"2026-02",C:"Gaseosas",V:6938},{P:"2026-02",C:"Bidones",V:23412},{P:"2026-02",C:"Agua Purificada",V:90},{P:"2026-02",C:"Aguas Saborizadas",V:51},{P:"2026-02",C:"Isotónica",V:0},
+  {P:"2026-03",C:"Gaseosas",V:254012},{P:"2026-03",C:"Bidones",V:224814},{P:"2026-03",C:"Agua Purificada",V:0},{P:"2026-03",C:"Aguas Saborizadas",V:1210},{P:"2026-03",C:"Isotónica",V:0}
+];
+
+// ── CATEGORÍAS ────────────────────────────────────────────────
+const CATS=[
+  {k:"Gaseosas",       c:"#3b8fd4"},
+  {k:"Bidones",        c:"#d4890f"},
+  {k:"Agua Purificada",c:"#1d9e75"},
+  {k:"Aguas Saborizadas",c:"#9b6dd4"},
+  {k:"Isotónica",      c:"#e05a5a"},
+];
+const PARTIAL=["2026-02","2026-03"];
+const MM={"01":"Ene","02":"Feb","03":"Mar","04":"Abr","05":"May","06":"Jun","07":"Jul","08":"Ago","09":"Sep","10":"Oct","11":"Nov","12":"Dic"};
+
+// ── ESTADO ────────────────────────────────────────────────────
+let aM="ventas", aV="total", cA=null, cB=null;
+
+// ── UTILS ─────────────────────────────────────────────────────
+const isV=()=>aM==="ventas";
+const raws=()=>isV()?rawV:rawP;
+const pct=(a,b)=>b===0?null:(a-b)/b*100;
+const sign=v=>v>=0?"+":"";
+const dc=v=>v===null?"neu":v>0?"pos":v<0?"neg":"neu";
+const mm=p=>p.slice(5,7);
+const lbl=p=>MM[mm(p)]+"'"+(p.slice(2,4));
+const isPart=p=>PARTIAL.includes(p);
+const fmtM=v=>"M$"+(v/1e6).toLocaleString("es-CL",{minimumFractionDigits:1,maximumFractionDigits:1});
+const fmtL=v=>Math.round(v/1000).toLocaleString("es-CL")+" kL";
+const fmt=v=>isV()?fmtM(v):fmtL(v);
+const toC=v=>isV()?Math.round(v/1e4)/100:Math.round(v/1000);
+const getPeriods=()=>[...new Set(raws().map(r=>r.P))].sort();
+
+function byPeriodCat(){
+  const m={};
+  raws().forEach(r=>{
+    if(!m[r.P])m[r.P]={};
+    m[r.P][r.C]=(m[r.P][r.C]||0)+r.V;
+  });
+  return m;
+}
+function totByPeriod(){
+  const m={};
+  raws().forEach(r=>{ m[r.P]=(m[r.P]||0)+r.V; });
+  return m;
+}
+
+// ── KPI STRIP (por categoría, YTD = periodos disponibles 2026) ──
+function kpiHTML(){
+  const periods2026=getPeriods().filter(p=>p.startsWith("2026"));
+  const periods2025=periods2026.map(p=>"2025-"+p.slice(5));
+  const bpc=byPeriodCat();
+
+  return `<div class="kpis">${CATS.map(cat=>{
+    const v26=periods2026.reduce((s,p)=>(bpc[p]?.[cat.k]||0)+s,0);
+    const v25=periods2025.reduce((s,p)=>(bpc[p]?.[cat.k]||0)+s,0);
+    const d=pct(v26,v25);
+    return `<div class="kpi">
+      <div class="kpi-l"><span class="cdot" style="background:${cat.c}"></span>${cat.k}</div>
+      <div class="kpi-v">${fmt(v26)}</div>
+      <div class="kpi-d ${dc(d)}">${d!==null?sign(d)+d.toFixed(1)+"% vs '25":"—"}</div>
+    </div>`;
+  }).join("")}</div>`;
+}
+
+// ── CHART OPTIONS ─────────────────────────────────────────────
+function cOpts(unit){
+  return{
+    responsive:true,maintainAspectRatio:false,
+    interaction:{mode:"index",intersect:false},
+    plugins:{
+      legend:{display:false},
+      tooltip:{backgroundColor:"#1a1d27",borderColor:"rgba(255,255,255,.1)",borderWidth:1,
+        titleColor:"#e8eaf0",bodyColor:"#7a7f94",padding:10,
+        callbacks:{label:ctx=>` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString("es-CL")} ${unit}`}
+      }
+    },
+    scales:{
+      x:{grid:{display:false},ticks:{color:"#7a7f94",font:{size:11}},border:{color:"rgba(255,255,255,.07)"}},
+      y:{grid:{color:"rgba(255,255,255,.05)"},border:{display:false},
+         ticks:{color:"#7a7f94",font:{size:11},callback:v=>v.toLocaleString("es-CL")}}
+    }
+  };
+}
+function killCharts(){if(cA){cA.destroy();cA=null;}if(cB){cB.destroy();cB=null;}}
+
+// ── RENDER TOTAL ──────────────────────────────────────────────
+function renderTotal(){
+  const periods=getPeriods();
+  const bpc=byPeriodCat();
+  const tot=totByPeriod();
+  const unit=isV()?"M$":"kL";
+
+  // Comparativo YTD: meses que existen en 2026 vs mismos meses 2025
+  const mos26=periods.filter(p=>p.startsWith("2026")).map(p=>mm(p));
+  const comp=mos26.map(m=>({
+    m, label:MM[m],
+    v25:CATS.reduce((s,c)=>(bpc["2025-"+m]?.[c.k]||0)+s,0),
+    v26:CATS.reduce((s,c)=>(bpc["2026-"+m]?.[c.k]||0)+s,0)
+  }));
+  const ytd25=comp.reduce((s,x)=>s+x.v25,0);
+  const ytd26=comp.reduce((s,x)=>s+x.v26,0);
+  const dYTD=pct(ytd26,ytd25);
+
+  // Tabla comparativa
+  const tfilas=comp.map(x=>{
+    const d=pct(x.v26,x.v25);
+    return `<tr>
+      <td><b>${x.label}</b></td>
+      <td>${fmt(x.v25)}</td>
+      <td class="${isPart("2026-"+x.m)?"dim":""}">${fmt(x.v26)}</td>
+      <td class="${dc(d)}">${d!==null?sign(d)+d.toFixed(1)+"%":"—"}</td>
+    </tr>`;
+  }).join("");
+
+  const legH=CATS.map(c=>`<span class="li"><span class="ll" style="background:${c.c}"></span>${c.k}</span>`).join("");
+
+  document.getElementById("mc").innerHTML=kpiHTML()+
+  `<div class="note">⚠ Feb y Mar 2026 son meses incompletos en el Excel fuente. Mar-2025 Bidones muestra valor negativo (notas de crédito > ventas brutas del mes).</div>
+  <div class="card">
+    <div class="ch">
+      <div><div class="ct">Serie completa por categoría · 202501–202603</div><div class="cs">Línea mensual · ${isV()?"Ventas Neto_Afecto":"Litros producidos"}</div></div>
+      <div class="leg">${legH}</div>
+    </div>
+    <div class="cw" style="height:280px"><canvas id="cA"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="ch">
+      <div><div class="ct">Comparativo YTD — Ene–Mar 2025 vs 2026</div><div class="cs">Barras agrupadas · mismo período año anterior</div></div>
+      <div style="font-size:11px;font-family:var(--mono);padding:3px 9px;border-radius:20px;background:${dYTD!==null&&dYTD>=0?"rgba(29,158,117,.15)":"rgba(201,74,74,.12)"};color:${dYTD!==null&&dYTD>=0?"var(--grn)":"var(--red)"}">${dYTD!==null?sign(dYTD)+dYTD.toFixed(1)+"%":"—"} YTD</div>
+    </div>
+    <div class="cw" style="height:210px"><canvas id="cComp"></canvas></div>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>Mes</th><th>2025</th><th>2026</th><th>Variación</th></tr></thead>
+    <tbody>${tfilas}</tbody>
+  </table></div>`;
+
+  killCharts();
+
+  // Chart 1: líneas por categoría — serie completa
+  cA=new Chart(document.getElementById("cA"),{type:"line",
+    data:{labels:periods.map(lbl),datasets:CATS.map(cat=>({
+      label:cat.k,
+      data:periods.map(p=>toC(bpc[p]?.[cat.k]||0)),
+      borderColor:cat.c,backgroundColor:cat.c+"15",
+      borderWidth:2.5,pointRadius:3,pointHoverRadius:6,
+      pointBackgroundColor:cat.c,tension:.35,fill:false
+    }))},options:cOpts(unit)
+  });
+
+  // Chart 2: barras comparativas YTD
+  cB=new Chart(document.getElementById("cComp"),{type:"bar",
+    data:{labels:comp.map(x=>x.label),datasets:[
+      {label:"2025",data:comp.map(x=>toC(x.v25)),backgroundColor:"rgba(255,255,255,.18)",borderRadius:4,barPercentage:.5,categoryPercentage:.7},
+      {label:"2026",data:comp.map(x=>toC(x.v26)),backgroundColor:"#3b8fd4",borderRadius:4,barPercentage:.5,categoryPercentage:.7}
+    ]},
+    options:{...cOpts(unit),plugins:{legend:{display:false},tooltip:{backgroundColor:"#1a1d27",borderColor:"rgba(255,255,255,.1)",borderWidth:1,titleColor:"#e8eaf0",bodyColor:"#7a7f94",padding:10,callbacks:{label:ctx=>` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString("es-CL")} ${unit}`}}}}
+  });
+}
+
+// ── RENDER CATEGORÍAS ─────────────────────────────────────────
+function renderCats(){
+  const periods=getPeriods();
+  const bpc=byPeriodCat();
+  const unit=isV()?"M$":"kL";
+  const legH=CATS.map(c=>`<span class="li"><span class="ll" style="background:${c.c}"></span>${c.k}</span>`).join("");
+
+  // Tabla: filas=categorías, cols=periodos
+  const thP=periods.map(p=>`<th class="${isPart(p)?"dim":""}">${lbl(p)}</th>`).join("");
+  const tfilas=CATS.map(cat=>{
+    const celdas=periods.map(p=>{
+      const v=bpc[p]?.[cat.k]||0;
+      return `<td class="${isPart(p)?"dim":""}">${fmt(v)}</td>`;
+    }).join("");
+    return `<tr><td><span class="cdot" style="background:${cat.c}"></span>${cat.k}</td>${celdas}</tr>`;
+  }).join("");
+
+  document.getElementById("mc").innerHTML=
+  `<div class="note">⚠ Feb y Mar 2026 son meses incompletos (atenuados). Mar-2025 Bidones negativo por notas de crédito.</div>
+  <div class="card">
+    <div class="ch">
+      <div><div class="ct">Evolución por categoría · 202501–202603</div><div class="cs">Línea independiente por categoría · ${isV()?"M$ Neto_Afecto":"Miles de litros"}</div></div>
+      <div class="leg">${legH}</div>
+    </div>
+    <div class="cw" style="height:300px"><canvas id="cB"></canvas></div>
+  </div>
+  <div class="tbl" style="overflow-x:auto"><table>
+    <thead><tr><th>Categoría</th>${thP}</tr></thead>
+    <tbody>${tfilas}</tbody>
+  </table></div>`;
+
+  killCharts();
+  cB=new Chart(document.getElementById("cB"),{type:"line",
+    data:{labels:periods.map(lbl),datasets:CATS.map(cat=>({
+      label:cat.k,
+      data:periods.map(p=>toC(bpc[p]?.[cat.k]||0)),
+      borderColor:cat.c,backgroundColor:cat.c+"15",
+      borderWidth:2.5,pointRadius:4,pointHoverRadius:7,
+      pointBackgroundColor:cat.c,tension:.35,fill:false
+    }))},options:cOpts(unit)
+  });
+}
+
+// ── NAVEGACIÓN ────────────────────────────────────────────────
+function render(){if(aV==="total")renderTotal();else renderCats();}
+function setM(m,b){aM=m;document.querySelectorAll(".top-tab").forEach(x=>x.classList.remove("on"));b.classList.add("on");render();}
+function setV(v,b){aV=v;document.querySelectorAll(".view-tab").forEach(x=>x.classList.remove("on"));b.classList.add("on");render();}
+
+render();
+</script>
+</body>
+</html>

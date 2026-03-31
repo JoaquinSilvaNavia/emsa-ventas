@@ -620,20 +620,60 @@ function renderDet(){
       return `<tr><td>${sab}</td><td>${fmt}</td>${celdas}<td style="font-weight:600">${fmt_v(tot,isV())}</td></tr>`;
     }).join('');
 
+    // KPIs top 3 combos
+    const top3 = combos.slice(0,3);
+    const kpiHTML = `<div class="kpis" style="grid-template-columns:repeat(${Math.min(3,top3.length)},minmax(0,1fr));margin-bottom:18px">
+      ${top3.map(({sab,fmt})=>{
+        const k=sab+'|'+fmt;
+        const tot=Object.values(pivot[k]||{}).reduce((s,v)=>s+v,0);
+        return `<div class="kpi"><div class="kpi-l">${sab} · ${fmt}</div><div class="kpi-v" style="font-size:15px">${fmt_v(tot,isV())}</div></div>`;
+      }).join('')}
+    </div>`;
+
+    // Datasets para gráfico — top 8 combos por total
+    const topCombos = combos.slice(0,8);
+    const detColors = ['#3b8fd4','#e8534a','#d4890f','#1d9e75','#9b6dd4','#38c4c4','#e8a838','#7a7f94'];
+    const datasets = topCombos.map(({sab,fmt},i)=>({
+      label: sab+' '+fmt,
+      data: periodos.map(p=>toC(pivot[sab+'|'+fmt]?.[p]||0)),
+      borderColor: detColors[i%detColors.length],
+      backgroundColor: detColors[i%detColors.length]+'15',
+      borderWidth:2, pointRadius:3, pointHoverRadius:6,
+      pointBackgroundColor: detColors[i%detColors.length],
+      tension:.35, fill:false
+    }));
+
+    const legHTML = topCombos.map(({sab,fmt},i)=>
+      `<span class="li"><span class="ll" style="background:${detColors[i%detColors.length]}"></span>${sab} ${fmt}</span>`
+    ).join('');
+
     mc.innerHTML = `
       <div class="cat-sel" style="margin-top:4px">${catBtns}</div>
       <div class="cat-sel" style="margin-bottom:8px">${sabBtns}</div>
       <div class="cat-sel" style="margin-bottom:14px">${fmtBtns}</div>
+      ${kpiHTML}
       <div class="card">
         <div class="ch">
-          <div><div class="ct">Detalle por sabor y formato · ${selDetCat}</div>
-          <div class="cs">${isV()?'Ventas M$':'Litros'} · serie mensual</div></div>
+          <div><div class="ct">Evolución mensual · ${selDetCat}${selDetSab?' · '+selDetSab:''}${selDetFmt?' · '+selDetFmt:''}</div>
+          <div class="cs">${isV()?'Ventas M$':'Litros'} · top ${topCombos.length} combinaciones por volumen</div></div>
+          <div class="leg">${legHTML}</div>
         </div>
-        <div style="overflow-x:auto"><table>
+        <div class="cw" style="height:280px"><canvas id="cDet"></canvas></div>
+      </div>
+      <div class="tbl" style="overflow-x:auto">
+        <table>
           <thead><tr><th>Sabor</th><th>Formato</th>${thP}<th>Total</th></tr></thead>
           <tbody>${rows}</tbody>
-        </table></div>
+        </table>
       </div>`;
+
+    // Destruir chart anterior si existe
+    if(cA){cA.destroy();cA=null;}
+    cA = new Chart(document.getElementById('cDet'),{
+      type:'line',
+      data:{labels:periodos.map(lbl), datasets},
+      options: cOpts(unit)
+    });
   }).catch(e=>{
     mc.innerHTML=`<div class="state-box"><span style="color:var(--red)">Error: ${e.message}</span></div>`;
   });

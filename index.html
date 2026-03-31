@@ -124,12 +124,12 @@ const API_KEY  = "AIzaSyCXaM0fXC-6H-Pz22uRTv52uMe3xtIoLkU";
 
 // ── CATEGORÍAS ────────────────────────────────────────────────
 const CATS = [
-  { k:"Gaseosas",          c:"#3b8fd4" },
-  { k:"Jugos",             c:"#e8a838" },
-  { k:"Bidones",           c:"#d4890f" },
-  { k:"Agua Purificada",   c:"#1d9e75" },
-  { k:"Aguas Saborizadas", c:"#9b6dd4" },
-  { k:"Isotónica",         c:"#e05a5a" },
+  { k:"Gaseosas",          c:"#3b8fd4" },  // azul
+  { k:"Jugos",             c:"#e8534a" },  // rojo coral — diferenciado de Bidones
+  { k:"Bidones",           c:"#d4890f" },  // ámbar
+  { k:"Agua Purificada",   c:"#1d9e75" },  // verde
+  { k:"Aguas Saborizadas", c:"#9b6dd4" },  // violeta
+  { k:"Isotónica",         c:"#38c4c4" },  // teal — diferenciado de Agua
 ];
 
 const MM = {"01":"Ene","02":"Feb","03":"Mar","04":"Abr","05":"May","06":"Jun",
@@ -309,19 +309,29 @@ function renderCats() {
   const periods = getPeriods();
   const bpc = byPeriodCat();
   const unit = isV() ? "M$" : "kL";
-  const legH = CATS.map(c=>`<span class="li"><span class="ll" style="background:${c.c}"></span>${c.k}</span>`).join("");
+
+  // Selector multi-categoría
+  const selHTML = CATS.map((c,i) =>
+    `<button class="cat-btn${activeCats.has(c.k)?" on":""}"
+      style="${activeCats.has(c.k)?"color:"+c.c+";border-color:"+c.c+";border-width:2px":""}"
+      onclick="toggleCat(${i})">${c.k}</button>`
+  ).join("");
+
+  // Solo categorías activas
+  const visibleCats = CATS.filter(c => activeCats.has(c.k));
 
   const thP = periods.map(p=>`<th>${lbl(p)}</th>`).join("");
-  const tfilas = CATS.map(cat => {
+  const tfilas = visibleCats.map(cat => {
     const celdas = periods.map(p=>`<td>${fmt(bpc[p]?.[cat.k]||0)}</td>`).join("");
     return `<tr><td><span class="cdot" style="background:${cat.c}"></span>${cat.k}</td>${celdas}</tr>`;
   }).join("");
 
   document.getElementById("mc").innerHTML =
-  `<div class="card">
+  `<div class="cat-sel">${selHTML}</div>
+  <div class="card">
     <div class="ch">
-      <div><div class="ct">Evolución por categoría — serie completa</div><div class="cs">${isV()?"M$ Neto_Afecto":"Miles de litros"} · línea mensual por categoría</div></div>
-      <div class="leg">${legH}</div>
+      <div><div class="ct">Evolución por categoría — serie completa</div>
+      <div class="cs">${isV()?"M$ Neto_Afecto":"Miles de litros"} · línea mensual · selecciona categorías arriba</div></div>
     </div>
     <div class="cw" style="height:300px"><canvas id="cB"></canvas></div>
   </div>
@@ -335,7 +345,7 @@ function renderCats() {
     type: "line",
     data: {
       labels: periods.map(lbl),
-      datasets: CATS.map(cat => ({
+      datasets: visibleCats.map(cat => ({
         label: cat.k,
         data: periods.map(p => toC(bpc[p]?.[cat.k]||0)),
         borderColor:cat.c, backgroundColor:cat.c+"15",
@@ -356,6 +366,18 @@ function setV(v,b){ aV=v; document.querySelectorAll(".view-tab").forEach(x=>x.cl
 // ── RENDER COMPARATIVO ANUAL ──────────────────────────────────
 let selCat = "Gaseosas";
 function setCat(i){ selCat = CATS[i].k; renderComp(); }
+
+// Multi-selección para vista "Por categoría"
+let activeCats = new Set(["Gaseosas","Jugos","Bidones","Agua Purificada","Aguas Saborizadas","Isotónica"]);
+function toggleCat(i){
+  const k = CATS[i].k;
+  if(activeCats.has(k)){
+    if(activeCats.size > 1) activeCats.delete(k); // mínimo 1 activa
+  } else {
+    activeCats.add(k);
+  }
+  renderCats();
+}
 
 function renderComp() {
   const bpc = byPeriodCat();

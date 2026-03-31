@@ -125,6 +125,20 @@ main{padding:20px 24px 48px;max-width:1060px}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
+
+// ── AUTENTICACIÓN ─────────────────────────────────────────────
+(function(){
+  var KEY = 'emsa_auth', PWD = 'LuisSilvaEMSA';
+  if(localStorage.getItem(KEY) === PWD) return;
+  var ok = false;
+  while(!ok){
+    var input = prompt('EMSA — Ingresa la clave de acceso:');
+    if(input === null) { document.body.innerHTML=''; return; }
+    if(input === PWD) { localStorage.setItem(KEY, PWD); ok = true; }
+    else alert('Clave incorrecta. Intenta nuevamente.');
+  }
+})();
+
 // ── CONFIGURACIÓN ─────────────────────────────────────────────
 const SHEET_ID = "1NppGV5go7xHYgEPUOERpljT9bvKdgaRkDbKyM41YaHY";
 const API_KEY  = "AIzaSyCXaM0fXC-6H-Pz22uRTv52uMe3xtIoLkU";

@@ -117,6 +117,7 @@ main{padding:20px 24px 48px;max-width:1060px}
   <button class="view-tab on" onclick="setV('total',this)">Total consolidado</button>
   <button class="view-tab"    onclick="setV('cats',this)">Por categoría</button>
   <button class="view-tab"    onclick="setV('comp',this)">Comparativo anual ↕</button>
+  <button class="view-tab"    onclick="setV('det',this)">Sabor y Formato</button>
 </div>
 
 <main id="mc">
@@ -379,8 +380,8 @@ function renderCats() {
 }
 
 // ── NAVEGACIÓN ────────────────────────────────────────────────
-function render() { if(aV==="total") renderTotal(); else if(aV==="cats") renderCats(); else renderComp(); }
-function setM(m,b){ aM=m; document.querySelectorAll(".top-tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); render(); }
+function render() { if(aV==="total") renderTotal(); else if(aV==="cats") renderCats(); else if(aV==="comp") renderComp(); else renderDet(); }
+function setM(m,b){ aM=m; selDetCat=''; selDetSab=''; selDetFmt=''; document.querySelectorAll(".top-tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); render(); }
 function setV(v,b){ aV=v; document.querySelectorAll(".view-tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); render(); }
 
 
@@ -523,6 +524,124 @@ function renderComp() {
       }
     }
   });
+}
+
+// ── RENDER SABOR Y FORMATO ───────────────────────────────────
+async function ensureDetData(){
+  const tab = isV() ? 'ventas_det' : 'produccion_det';
+  const cache = isV() ? rawVD : rawPD;
+  if(cache.length) return cache;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${tab}!A:F?key=${API_KEY}`;
+  const r = await fetch(url);
+  if(!r.ok) throw new Error('HTTP '+r.status+' — '+tab);
+  const d = await r.json();
+  const rows = d.values||[];
+  if(rows.length<2) return [];
+  const h = rows[0];
+  const data = rows.slice(1).map(row=>{ const o={}; h.forEach((k,i)=>o[k]=row[i]??''); return o; });
+  if(isV()) rawVD=data; else rawPD=data;
+  return data;
+}
+
+function renderDet(){
+  const mc = document.getElementById('mc');
+  mc.innerHTML = '<div class="state-box"><div class="spinner"></div><span>Cargando detalle...</span></div>';
+
+  ensureDetData().then(data => {
+    if(!data.length){
+      mc.innerHTML='<div class="state-box"><span>Sin datos de detalle. Ejecutar sync con script actualizado.</span></div>';
+      return;
+    }
+    const vField = isV() ? 'MONTO_VENTA' : 'LITROS';
+    const unit   = isV() ? 'M$' : 'kL';
+
+    // Opciones de filtro
+    const cats = [...new Set(data.map(r=>r.CATEGORIA))].sort();
+    const allSabs = [...new Set(data.map(r=>r.SABOR))].sort();
+    const allFmts = [...new Set(data.map(r=>r.FORMATO))].sort();
+
+    if(!selDetCat && cats.length) selDetCat = cats[0];
+
+    // Filtrar
+    let filtered = data.filter(r =>
+      (!selDetCat || r.CATEGORIA===selDetCat) &&
+      (!selDetSab || r.SABOR===selDetSab) &&
+      (!selDetFmt || r.FORMATO===selDetFmt)
+    );
+
+    // Opciones dependientes del filtro actual
+    const sabsDisp = [...new Set(data.filter(r=>r.CATEGORIA===selDetCat).map(r=>r.SABOR))].sort();
+    const fmtsDisp = [...new Set(data.filter(r=>r.CATEGORIA===selDetCat && (!selDetSab||r.SABOR===selDetSab)).map(r=>r.FORMATO))].sort();
+
+    const catBtns = cats.map((c,i)=>
+      `<button class="cat-btn${c===selDetCat?' on':''}"
+        style="${c===selDetCat?'color:'+CATS[CATS.findIndex(x=>x.k===c)]?.c+';border-color:'+CATS[CATS.findIndex(x=>x.k===c)]?.c+';border-width:2px':''}"
+        onclick="selDetCat='${c}';selDetSab='';selDetFmt='';renderDet()">${c}</button>`
+    ).join('');
+
+    const sabBtns = `<span style="font-size:11px;color:var(--muted);margin-right:6px">Sabor:</span>`+
+      ['','...todos',...sabsDisp].filter((v,i,a)=>a.indexOf(v)===i && v!=='...todos' || v==='...todos' && sabsDisp.length>1).map(s=>
+        `<button class="cat-btn${s===selDetSab?' on':''}" style="font-size:11px;padding:3px 10px"
+          onclick="selDetSab='${s}';selDetFmt='';renderDet()">${s||'Todos'}</button>`
+      ).join('');
+
+    const fmtBtns = `<span style="font-size:11px;color:var(--muted);margin-right:6px">Formato:</span>`+
+      ['',...fmtsDisp].map(f=>
+        `<button class="cat-btn${f===selDetFmt?' on':''}" style="font-size:11px;padding:3px 10px"
+          onclick="selDetFmt='${f}';renderDet()">${f||'Todos'}</button>`
+      ).join('');
+
+    // Agrupar por periodo + sabor + formato
+    const periodos = [...new Set(filtered.map(r=>r.PERIODO))].sort();
+    const combos   = [...new Map(filtered.map(r=>[r.SABOR+'|'+r.FORMATO, {sab:r.SABOR, fmt:r.FORMATO}])).values()]
+                      .sort((a,b)=>a.sab.localeCompare(b.sab)||a.fmt.localeCompare(b.fmt));
+
+    // Pivot: filas=sabor+formato, cols=periodos
+    const pivot = {};
+    filtered.forEach(r=>{
+      const k=r.SABOR+'|'+r.FORMATO;
+      if(!pivot[k]) pivot[k]={};
+      pivot[k][r.PERIODO]=(pivot[k][r.PERIODO]||0)+num(r[vField]);
+    });
+
+    // Totales por combo (para ordenar)
+    combos.sort((a,b)=>{
+      const tA=Object.values(pivot[a.sab+'|'+a.fmt]||{}).reduce((s,v)=>s+v,0);
+      const tB=Object.values(pivot[b.sab+'|'+b.fmt]||{}).reduce((s,v)=>s+v,0);
+      return tB-tA;
+    });
+
+    const thP = periodos.map(p=>`<th>${lbl(p)}</th>`).join('');
+    const rows = combos.map(({sab,fmt})=>{
+      const k=sab+'|'+fmt;
+      const tot=Object.values(pivot[k]||{}).reduce((s,v)=>s+v,0);
+      const celdas=periodos.map(p=>`<td>${pivot[k]?.[p]>0?fmt_v(pivot[k][p],isV()):'—'}</td>`).join('');
+      return `<tr><td>${sab}</td><td>${fmt}</td>${celdas}<td style="font-weight:600">${fmt_v(tot,isV())}</td></tr>`;
+    }).join('');
+
+    mc.innerHTML = `
+      <div class="cat-sel" style="margin-top:4px">${catBtns}</div>
+      <div class="cat-sel" style="margin-bottom:8px">${sabBtns}</div>
+      <div class="cat-sel" style="margin-bottom:14px">${fmtBtns}</div>
+      <div class="card">
+        <div class="ch">
+          <div><div class="ct">Detalle por sabor y formato · ${selDetCat}</div>
+          <div class="cs">${isV()?'Ventas M$':'Litros'} · serie mensual</div></div>
+        </div>
+        <div style="overflow-x:auto"><table>
+          <thead><tr><th>Sabor</th><th>Formato</th>${thP}<th>Total</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </div>`;
+  }).catch(e=>{
+    mc.innerHTML=`<div class="state-box"><span style="color:var(--red)">Error: ${e.message}</span></div>`;
+  });
+}
+
+function fmt_v(v, isVentas){
+  return isVentas
+    ? 'M$'+(v/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1})
+    : Math.round(v/1000).toLocaleString('es-CL')+' kL';
 }
 
 // ── INIT ──────────────────────────────────────────────────────

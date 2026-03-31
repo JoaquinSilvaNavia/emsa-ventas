@@ -186,11 +186,16 @@ function kpiHTML() {
   return `<div class="kpis">${CATS.map(cat => {
     const v26 = p26.reduce((s,p) => s + (bpc[p]?.[cat.k] || 0), 0);
     const v25 = p25.reduce((s,p) => s + (bpc[p]?.[cat.k] || 0), 0);
-    const d = pct(v26, v25);
+    const d   = pct(v26, v25);
+    // Si v25=0 no hay base comparable — mostrar solo acumulado 2026
+    const hasComp = v25 > 0;
+    const deltaHTML = hasComp
+      ? `<div class="kpi-d ${dc(d)}">${sign(d)}${d.toFixed(1)}% vs '25</div>`
+      : `<div class="kpi-d neu">Acum. 2026</div>`;
     return `<div class="kpi">
       <div class="kpi-l"><span class="cdot" style="background:${cat.c}"></span>${cat.k}</div>
       <div class="kpi-v">${fmt(v26)}</div>
-      <div class="kpi-d ${dc(d)}">${d !== null ? sign(d)+d.toFixed(1)+"% vs '25" : "sin datos"}</div>
+      ${deltaHTML}
     </div>`;
   }).join("")}</div>`;
 }

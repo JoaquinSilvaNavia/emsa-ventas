@@ -580,15 +580,21 @@ function renderDet(){
         onclick="selDetCat='${c}';selDetSab='';selDetFmt='';renderDet()">${c}</button>`
     ).join('');
 
+    // Color activo = color de la categoría seleccionada
+    const activeCatColor = CATS.find(x=>x.k===selDetCat)?.c || 'var(--text)';
+    const activeStyle = `color:${activeCatColor};border-color:${activeCatColor};border-width:2px`;
+
     const sabBtns = `<span style="font-size:11px;color:var(--muted);margin-right:6px">Sabor:</span>`+
-      ['','...todos',...sabsDisp].filter((v,i,a)=>a.indexOf(v)===i && v!=='...todos' || v==='...todos' && sabsDisp.length>1).map(s=>
-        `<button class="cat-btn${s===selDetSab?' on':''}" style="font-size:11px;padding:3px 10px"
+      ['',...sabsDisp].map(s=>
+        `<button class="cat-btn${s===selDetSab?' on':''}"
+          style="font-size:11px;padding:3px 10px;${s===selDetSab?activeStyle:''}"
           onclick="selDetSab='${s}';selDetFmt='';renderDet()">${s||'Todos'}</button>`
       ).join('');
 
     const fmtBtns = `<span style="font-size:11px;color:var(--muted);margin-right:6px">Formato:</span>`+
       ['',...fmtsDisp].map(f=>
-        `<button class="cat-btn${f===selDetFmt?' on':''}" style="font-size:11px;padding:3px 10px"
+        `<button class="cat-btn${f===selDetFmt?' on':''}"
+          style="font-size:11px;padding:3px 10px;${f===selDetFmt?activeStyle:''}"
           onclick="selDetFmt='${f}';renderDet()">${f||'Todos'}</button>`
       ).join('');
 

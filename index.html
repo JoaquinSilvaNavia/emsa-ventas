@@ -355,6 +355,7 @@ function setV(v,b){ aV=v; document.querySelectorAll(".view-tab").forEach(x=>x.cl
 
 // ── RENDER COMPARATIVO ANUAL ──────────────────────────────────
 let selCat = "Gaseosas";
+function setCat(i){ selCat = CATS[i].k; renderComp(); }
 
 function renderComp() {
   const bpc = byPeriodCat();
@@ -369,10 +370,10 @@ function renderComp() {
   const years = [...new Set(Object.keys(bpc).map(p => p.slice(0,4)))].sort();
 
   // Selector de categoría
-  const selHTML = CATS.map(c =>
-    `<button class="cat-btn${c.k===selCat?" on":""}" 
-      style="${c.k===selCat?"color:"+c.c+";border-color:"+c.c:""}
-      onclick="selCat='${c.k}';renderComp()">${c.k}</button>`
+  const selHTML = CATS.map((c,i) =>
+    `<button class="cat-btn${c.k===selCat?" on":""}"
+      style="${c.k===selCat?"color:"+c.c+";border-color:"+c.c+";border-width:2px":""}"
+      onclick="setCat(${i})">${c.k}</button>`
   ).join("");
 
   // Datasets: una barra por año

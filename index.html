@@ -158,7 +158,8 @@ const MM = {"01":"Ene","02":"Feb","03":"Mar","04":"Abr","05":"May","06":"Jun",
             "07":"Jul","08":"Ago","09":"Sep","10":"Oct","11":"Nov","12":"Dic"};
 
 // ── ESTADO ────────────────────────────────────────────────────
-let rawV=[], rawP=[], aM="ventas", aV="total", cA=null, cB=null;
+let rawV=[], rawP=[], rawVD=[], rawPD=[], aM="ventas", aV="total", cA=null, cB=null;
+let selDetCat="", selDetSab="", selDetFmt="";
 
 // ── UTILS ─────────────────────────────────────────────────────
 const num  = v => { var n=Number(String(v??'').trim()); return isNaN(n)?0:n; };

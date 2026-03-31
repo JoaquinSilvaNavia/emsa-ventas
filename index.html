@@ -118,6 +118,7 @@ main{padding:20px 24px 48px;max-width:1060px}
   <button class="view-tab"    onclick="setV('cats',this)">Por categoría</button>
   <button class="view-tab"    onclick="setV('comp',this)">Comparativo anual ↕</button>
   <button class="view-tab"    onclick="setV('det',this)">Sabor y Formato</button>
+  <button class="view-tab"    onclick="setV('detcomp',this)">Comparativo anual ↕</button>
 </div>
 
 <main id="mc">
@@ -160,6 +161,7 @@ const MM = {"01":"Ene","02":"Feb","03":"Mar","04":"Abr","05":"May","06":"Jun",
 // ── ESTADO ────────────────────────────────────────────────────
 let rawV=[], rawP=[], rawVD=[], rawPD=[], aM="ventas", aV="total", cA=null, cB=null;
 let selDetCat="", selDetSab="", selDetFmt="";
+let selDC_Cat="", selDC_Sab="", selDC_Fmt="";
 
 // ── UTILS ─────────────────────────────────────────────────────
 const num  = v => { var n=Number(String(v??'').trim()); return isNaN(n)?0:n; };
@@ -381,7 +383,7 @@ function renderCats() {
 }
 
 // ── NAVEGACIÓN ────────────────────────────────────────────────
-function render() { if(aV==="total") renderTotal(); else if(aV==="cats") renderCats(); else if(aV==="comp") renderComp(); else renderDet(); }
+function render() { if(aV==="total") renderTotal(); else if(aV==="cats") renderCats(); else if(aV==="comp") renderComp(); else if(aV==="det") renderDet(); else renderDetComp(); }
 function setM(m,b){ aM=m; selDetCat=''; selDetSab=''; selDetFmt=''; document.querySelectorAll(".top-tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); render(); }
 function setV(v,b){ aV=v; document.querySelectorAll(".view-tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); render(); }
 
@@ -689,6 +691,160 @@ function fmt_v(v, isVentas){
   return isVentas
     ? 'M$'+(v/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1})
     : Math.round(v/1000).toLocaleString('es-CL')+' kL';
+}
+
+// ── RENDER COMPARATIVO SABOR Y FORMATO ───────────────────────
+function renderDetComp(){
+  const mc = document.getElementById('mc');
+  mc.innerHTML = '<div class="state-box"><div class="spinner"></div><span>Cargando comparativo...</span></div>';
+
+  ensureDetData().then(data => {
+    if(!data.length){
+      mc.innerHTML='<div class="state-box"><span>Sin datos. Ejecutar sync con script actualizado.</span></div>';
+      return;
+    }
+    const vField = isV() ? 'MONTO_VENTA' : 'LITROS';
+    const unit   = isV() ? 'M$' : 'kL';
+
+    const cats = [...new Set(data.map(r=>r.CATEGORIA))].sort();
+    if(!selDC_Cat && cats.length) selDC_Cat = cats[0];
+
+    // Filtrar por categoría, sabor, formato
+    const sabsDisp = [...new Set(data.filter(r=>r.CATEGORIA===selDC_Cat).map(r=>r.SABOR))].sort();
+    const fmtsDisp = [...new Set(data.filter(r=>r.CATEGORIA===selDC_Cat&&(!selDC_Sab||r.SABOR===selDC_Sab)).map(r=>r.FORMATO))].sort();
+
+    let filtered = data.filter(r=>
+      r.CATEGORIA===selDC_Cat &&
+      (!selDC_Sab||r.SABOR===selDC_Sab) &&
+      (!selDC_Fmt||r.FORMATO===selDC_Fmt)
+    );
+
+    // Meses YTD 2026 y equivalentes 2025
+    const mos26 = [...new Set(filtered.filter(r=>r.PERIODO.startsWith('2026')).map(r=>r.PERIODO.slice(5,7)))].sort();
+    const mos25 = mos26.map(m=>'2025-'+m);
+    const mos26f = mos26.map(m=>'2026-'+m);
+
+    // Agrupar por sabor+formato para cada año
+    const combos = [...new Map(filtered.map(r=>[r.SABOR+'|'+r.FORMATO,{sab:r.SABOR,fmt:r.FORMATO}])).values()];
+    const piv = {};
+    filtered.forEach(r=>{
+      const k=r.SABOR+'|'+r.FORMATO, p=r.PERIODO;
+      if(!piv[k]) piv[k]={};
+      piv[k][p]=(piv[k][p]||0)+num(r[vField]);
+    });
+
+    // Total YTD por combo
+    combos.forEach(c=>{
+      const k=c.sab+'|'+c.fmt;
+      c.v26=mos26f.reduce((s,p)=>s+(piv[k][p]||0),0);
+      c.v25=mos25.reduce((s,p)=>s+(piv[k][p]||0),0);
+      c.d=c.v25>0?((c.v26-c.v25)/c.v25*100):null;
+    });
+    combos.sort((a,b)=>b.v26-a.v26);
+    const topC = combos.slice(0,10);
+
+    // Colores
+    const activeCatColor = CATS.find(x=>x.k===selDC_Cat)?.c||'#3b8fd4';
+    const activeStyle = `color:${activeCatColor};border-color:${activeCatColor};border-width:2px`;
+
+    const catBtns = cats.map(c=>
+      `<button class="cat-btn${c===selDC_Cat?' on':''}"
+        style="${c===selDC_Cat?'color:'+CATS.find(x=>x.k===c)?.c+';border-color:'+CATS.find(x=>x.k===c)?.c+';border-width:2px':''}"
+        onclick="selDC_Cat='${c}';selDC_Sab='';selDC_Fmt='';renderDetComp()">${c}</button>`
+    ).join('');
+
+    const sabBtns = `<span style="font-size:11px;color:var(--muted);margin-right:6px">Sabor:</span>`+
+      ['',...sabsDisp].map(s=>
+        `<button class="cat-btn${s===selDC_Sab?' on':''}"
+          style="font-size:11px;padding:3px 10px;${s===selDC_Sab?activeStyle:''}"
+          onclick="selDC_Sab='${s}';selDC_Fmt='';renderDetComp()">${s||'Todos'}</button>`
+      ).join('');
+
+    const fmtBtns = `<span style="font-size:11px;color:var(--muted);margin-right:6px">Formato:</span>`+
+      ['',...fmtsDisp].map(f=>
+        `<button class="cat-btn${f===selDC_Fmt?' on':''}"
+          style="font-size:11px;padding:3px 10px;${f===selDC_Fmt?activeStyle:''}"
+          onclick="selDC_Fmt='${f}';renderDetComp()">${f||'Todos'}</button>`
+      ).join('');
+
+    // KPIs totales
+    const tot26=topC.reduce((s,c)=>s+c.v26,0);
+    const tot25=topC.reduce((s,c)=>s+c.v25,0);
+    const dTot=tot25>0?((tot26-tot25)/tot25*100):null;
+    const kpiHTML=`<div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:18px">
+      <div class="kpi"><div class="kpi-l">YTD 2026</div><div class="kpi-v">${fmt_v(tot26,isV())}</div><div class="kpi-d ${dTot!==null&&dTot>=0?'pos':'neg'}">${dTot!==null?(dTot>=0?'+':'')+dTot.toFixed(1)+'% vs 2025':'—'}</div></div>
+      <div class="kpi"><div class="kpi-l">YTD 2025</div><div class="kpi-v">${fmt_v(tot25,isV())}</div><div class="kpi-d neu">mismo período</div></div>
+      <div class="kpi"><div class="kpi-l">Mejor combinación</div><div class="kpi-v" style="font-size:13px">${topC[0]?.sab||'—'} ${topC[0]?.fmt||''}</div><div class="kpi-d neu">${topC[0]?fmt_v(topC[0].v26,isV()):'—'}</div></div>
+    </div>`;
+
+    // Gráfico barras agrupadas
+    const barLabels = topC.map(c=>`${c.sab} ${c.fmt}`);
+    const ds = [
+      {label:'2025', data:topC.map(c=>toC(c.v25)), backgroundColor:'rgba(255,255,255,.18)', borderRadius:4, barPercentage:.5, categoryPercentage:.7},
+      {label:'2026', data:topC.map(c=>toC(c.v26)), backgroundColor:activeCatColor, borderRadius:4, barPercentage:.5, categoryPercentage:.7}
+    ];
+
+    // Tabla
+    const rows = topC.map(c=>{
+      const d=c.d, cls=d===null?'neu':d>=0?'pos':'neg';
+      return `<tr>
+        <td>${c.sab}</td><td>${c.fmt}</td>
+        <td>${fmt_v(c.v25,isV())}</td>
+        <td>${fmt_v(c.v26,isV())}</td>
+        <td class="${cls}">${d!==null?(d>=0?'+':'')+d.toFixed(1)+'%':'—'}</td>
+      </tr>`;
+    }).join('');
+
+    const mesesLabel = mos26.map(m=>({
+      '01':'Ene','02':'Feb','03':'Mar','04':'Abr','05':'May','06':'Jun',
+      '07':'Jul','08':'Ago','09':'Sep','10':'Oct','11':'Nov','12':'Dic'
+    }[m]||m)).join('–');
+
+    mc.innerHTML = `
+      <div class="cat-sel" style="margin-top:4px">${catBtns}</div>
+      <div class="cat-sel" style="margin-bottom:8px">${sabBtns}</div>
+      <div class="cat-sel" style="margin-bottom:14px">${fmtBtns}</div>
+      ${kpiHTML}
+      <div class="card">
+        <div class="ch">
+          <div><div class="ct">Comparativo ${mesesLabel} 2025 vs 2026 · ${selDC_Cat}</div>
+          <div class="cs">${isV()?'Ventas M$':'Litros'} · top 10 combinaciones sabor+formato</div></div>
+          <div class="leg">
+            <span class="li"><span class="ll" style="background:rgba(255,255,255,.35)"></span>2025</span>
+            <span class="li"><span class="ll" style="background:${activeCatColor}"></span>2026</span>
+          </div>
+        </div>
+        <div class="cw" style="height:320px"><canvas id="cDetComp"></canvas></div>
+      </div>
+      <div class="tbl" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Sabor</th><th>Formato</th><th>${mesesLabel} 2025</th><th>${mesesLabel} 2026</th><th>Variación</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+
+    if(cA){cA.destroy();cA=null;}
+    cA = new Chart(document.getElementById('cDetComp'),{
+      type:'bar',
+      data:{labels:barLabels, datasets:ds},
+      options:{
+        indexAxis:'y',
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:false},tooltip:{
+          backgroundColor:'#1a1d27',borderColor:'rgba(255,255,255,.1)',borderWidth:1,
+          titleColor:'#e8eaf0',bodyColor:'#7a7f94',padding:10,
+          callbacks:{label:ctx=>` ${ctx.dataset.label}: ${ctx.parsed.x.toLocaleString('es-CL')} ${unit}`}
+        }},
+        scales:{
+          x:{grid:{color:'rgba(255,255,255,.05)'},border:{display:false},ticks:{color:'#7a7f94',font:{size:11},callback:v=>v.toLocaleString('es-CL')}},
+          y:{grid:{display:false},ticks:{color:'#7a7f94',font:{size:11}},border:{color:'rgba(255,255,255,.07)'}}
+        }
+      }
+    });
+  }).catch(e=>{
+    mc.innerHTML=`<div class="state-box"><span style="color:var(--red)">Error: ${e.message}</span></div>`;
+  });
 }
 
 // ── INIT ──────────────────────────────────────────────────────

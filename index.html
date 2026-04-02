@@ -850,124 +850,95 @@ function renderDetComp(){
   });
 }
 
-// ── RENDER PROD VS VENTAS ─────────────────────────────────────
+// ── RENDER PROD VS VENTAS ────────────────────────────────────
 async function renderPVComp(){
   const mc=document.getElementById('mc');
   mc.innerHTML='<div class="state-box"><div class="spinner"></div><span>Cargando comparativo...</span></div>';
 
-  // Cargar ambas fuentes si no están cargadas
   if(!rawV.length||!rawP.length){
     mc.innerHTML='<div class="state-box"><span>Sin datos. Verificar sync.</span></div>';
     return;
   }
 
-  // Categorías disponibles en ambos datasets
-  const catsV=new Set(rawV.map(r=>r.CATEGORIA));
-  const catsP=new Set(rawP.map(r=>r.CATEGORIA));
-  const cats=CATS.map(c=>c.k).filter(k=>catsV.has(k)||catsP.has(k));
+  const cats=CATS.map(c=>c.k).filter(k=>rawV.some(r=>r.CATEGORIA===k)||rawP.some(r=>r.CATEGORIA===k));
   if(!pvc_Cat&&cats.length) pvc_Cat=cats[0];
 
-  // Formatos disponibles para ventas (para filtrar)
-  // Usar ventas_det para obtener litros por formato
-  let vDetData=rawVD.length?rawVD:[];
-  const fmts=[...new Set(vDetData.filter(r=>r.CATEGORIA===pvc_Cat).map(r=>r.FORMATO))].sort();
-
-  // Períodos (15 meses)
+  const catColor=CATS.find(c=>c.k===pvc_Cat)?.c||'#3b8fd4';
   const periodos=getPeriods();
 
-  // Ventas en litros: desde ventas_det si disponible, sino calcular desde ventas
-  // ventas_det tiene MONTO_VENTA, necesitamos litros
-  // Usamos rawV (monto) y rawP (litros) — comparamos en índice base 100 si unidades distintas
-  // Pero el usuario pidió litros como denominador común
-  // Ventas en litros: necesitamos ventas_det con campo litros o calcularlo
-  // Como ventas_det solo tiene MONTO_VENTA, usamos rawP para litros producción
-  // y para ventas mostramos índice de volumen (unidades × lts — no disponible en aggregado)
-  // SOLUCIÓN: usar ventas_det filtrado por categoria+formato para obtener proporciones
-  // y rawP para producción en litros
-
-  // Agrupar ventas por período y categoría (MONTO)
-  const pvV={};
+  // Litros ventas desde campo LITROS_VENTA del sheet (agregado por sync actualizado)
+  const pvVL={};
   rawV.filter(r=>r.CATEGORIA===pvc_Cat).forEach(r=>{
-    pvV[r.PERIODO]=(pvV[r.PERIODO]||0)+num(r.MONTO_VENTA);
+    const lv = num(r.LITROS_VENTA||0);
+    pvVL[r.PERIODO]=(pvVL[r.PERIODO]||0)+lv;
   });
 
-  // Agrupar producción por período y categoría (LITROS)
+  // Litros producción
   const pvP={};
-  rawP.filter(r=>r.CATEGORIA===pvc_Cat&&(!pvc_Fmt||true)).forEach(r=>{
+  rawP.filter(r=>r.CATEGORIA===pvc_Cat).forEach(r=>{
     pvP[r.PERIODO]=(pvP[r.PERIODO]||0)+num(r.LITROS);
   });
 
-  // Para ventas en litros necesitamos ventas_det
-  const pvVL={};
-  if(vDetData.length){
-    vDetData.filter(r=>r.CATEGORIA===pvc_Cat&&(!pvc_Fmt||r.FORMATO===pvc_Fmt)).forEach(r=>{
-      // ventas_det tiene MONTO_VENTA no litros — no podemos usarlo directamente
-      // Aproximamos: usamos rawVD como proxy del mix
-    });
-  }
-  // Mejor: mostrar producción en litros (eje izq) y ventas en M$ (eje der)
-  // con doble eje — más honesto que convertir
-  const hasP=periodos.some(p=>pvP[p]>0);
-  const hasV=periodos.some(p=>pvV[p]>0);
-
-  const catColor=CATS.find(c=>c.k===pvc_Cat)?.c||'#3b8fd4';
-
-  // KPIs
-  const totP=periodos.reduce((s,p)=>s+(pvP[p]||0),0);
-  const totV2=periodos.reduce((s,p)=>s+(pvV[p]||0),0);
+  // Si LITROS_VENTA no existe en el Sheet (sync antiguo), mostrar aviso
+  const hasLV = rawV.some(r=>r.LITROS_VENTA!==undefined&&r.LITROS_VENTA!=='');
 
   const catBtns=cats.map(c=>{
     const cc=CATS.find(x=>x.k===c)?.c||'#7a7f94';
     return `<button class="cat-btn${c===pvc_Cat?' on':''}"
       style="${c===pvc_Cat?'color:'+cc+';border-color:'+cc+';border-width:2px':''}"
-      onclick="pvc_Cat='${c}';pvc_Fmt='';renderPVComp()">${c}</button>`;
+      onclick="pvc_Cat='${c}';renderPVComp()">${c}</button>`;
   }).join('');
 
-  const fmtBtns=`<span style="font-size:11px;color:var(--muted);margin-right:6px">Formato:</span>`+
-    ['',...fmts].map(f=>`<button class="cat-btn${f===pvc_Fmt?' on':''}"
-      style="font-size:11px;padding:3px 10px;${f===pvc_Fmt?'color:'+catColor+';border-color:'+catColor+';border-width:2px':''}"
-      onclick="pvc_Fmt='${f}';renderPVComp()">${f||'Todos'}</button>`).join('');
+  const totVL=periodos.reduce((s,p)=>s+(pvVL[p]||0),0);
+  const totP =periodos.reduce((s,p)=>s+(pvP[p]||0),0);
+  const ratio=totP>0?(totVL/totP*100).toFixed(1):null;
 
-  // Tabla mes a mes
   const tRows=periodos.map(p=>{
-    const litP=pvP[p]||0;
-    const mtoV=pvV[p]||0;
+    const lv=pvVL[p]||0, lp=pvP[p]||0;
+    const r=lp>0?(lv/lp*100).toFixed(0):null;
     return `<tr>
       <td>${lbl(p)}</td>
-      <td style="color:${catColor}">${litP>0?Math.round(litP/1000).toLocaleString('es-CL')+' kL':'—'}</td>
-      <td>${mtoV>0?'M$'+(mtoV/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1}):'—'}</td>
+      <td style="color:${catColor}">${lp>0?Math.round(lp/1000).toLocaleString('es-CL')+' kL':'—'}</td>
+      <td>${lv>0?Math.round(lv/1000).toLocaleString('es-CL')+' kL':'—'}</td>
+      <td style="color:${r?parseFloat(r)>100?'var(--grn)':'var(--amb)':'var(--muted)'}">${r?r+'%':'—'}</td>
     </tr>`;
   }).join('');
 
   mc.innerHTML=`
     <div class="cat-sel" style="margin-top:4px">${catBtns}</div>
-    <div class="cat-sel" style="margin-bottom:14px">${fmtBtns}</div>
-    <div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:18px">
+    ${!hasLV?`<div style="background:rgba(212,137,15,.1);border:1px solid rgba(212,137,15,.3);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--amb);margin-bottom:14px">
+      Ejecutar sync actualizado (emsa_sync_ventas.py) para activar litros de ventas.</div>`:''}
+    <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:18px">
       <div class="kpi" style="border-left:3px solid ${catColor}">
-        <div class="kpi-l">Producción YTD · ${pvc_Cat}</div>
+        <div class="kpi-l">Producción total · ${pvc_Cat}</div>
         <div class="kpi-v" style="color:${catColor}">${Math.round(totP/1000).toLocaleString('es-CL')} kL</div>
         <div class="kpi-s">litros producidos</div>
       </div>
       <div class="kpi">
-        <div class="kpi-l">Ventas YTD · ${pvc_Cat}</div>
-        <div class="kpi-v">${'M$'+(totV2/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1})}</div>
-        <div class="kpi-s">monto neto</div>
+        <div class="kpi-l">Ventas total · ${pvc_Cat}</div>
+        <div class="kpi-v">${Math.round(totVL/1000).toLocaleString('es-CL')} kL</div>
+        <div class="kpi-s">litros vendidos</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l">Ratio ventas/producción</div>
+        <div class="kpi-v" style="color:${ratio&&parseFloat(ratio)>100?'var(--grn)':'var(--amb)'}">${ratio?ratio+'%':'—'}</div>
+        <div class="kpi-s">% vendido vs producido</div>
       </div>
     </div>
     <div class="card">
       <div class="ch">
-        <div><div class="ct">Producción vs Ventas · ${pvc_Cat}</div>
-        <div class="cs">Producción en kL (eje izq) · Ventas en M$ (eje der) · 15 meses</div></div>
+        <div><div class="ct">Producción vs Ventas en Litros · ${pvc_Cat}</div>
+        <div class="cs">kL por mes · misma unidad de medida</div></div>
         <div class="leg">
           <span class="li"><span class="ll" style="background:${catColor}"></span>Producción kL</span>
-          <span class="li"><span class="ll" style="background:rgba(255,255,255,.4)"></span>Ventas M$</span>
+          <span class="li"><span class="ll" style="background:rgba(255,255,255,.5)"></span>Ventas kL</span>
         </div>
       </div>
       <div class="cw" style="height:280px"><canvas id="cPV"></canvas></div>
     </div>
     <div class="tbl" style="margin-top:14px">
       <table>
-        <thead><tr><th>Período</th><th>Producción</th><th>Ventas</th></tr></thead>
+        <thead><tr><th>Período</th><th>Producción</th><th>Ventas</th><th>% Ventas/Prod.</th></tr></thead>
         <tbody>${tRows}</tbody>
       </table>
     </div>`;
@@ -978,14 +949,12 @@ async function renderPVComp(){
     data:{
       labels:periodos.map(lbl),
       datasets:[
-        {label:'Producción kL',data:periodos.map(p=>Math.round((pvP[p]||0)/1000)),
-          backgroundColor:catColor+'99',borderRadius:4,barPercentage:.5,categoryPercentage:.7,
-          yAxisID:'yL'},
-        {label:'Ventas M$',data:periodos.map(p=>Math.round((pvV[p]||0)/1e6*10)/10),
-          type:'line',borderColor:'rgba(255,255,255,.7)',backgroundColor:'transparent',
-          borderWidth:2.5,pointRadius:4,pointHoverRadius:7,
-          pointBackgroundColor:'rgba(255,255,255,.7)',tension:.35,
-          yAxisID:'yR'}
+        {label:'Producción kL',
+          data:periodos.map(p=>Math.round((pvP[p]||0)/1000)),
+          backgroundColor:catColor+'99',borderRadius:4,barPercentage:.45,categoryPercentage:.75},
+        {label:'Ventas kL',
+          data:periodos.map(p=>Math.round((pvVL[p]||0)/1000)),
+          backgroundColor:'rgba(255,255,255,.35)',borderRadius:4,barPercentage:.45,categoryPercentage:.75}
       ]
     },
     options:{
@@ -993,17 +962,18 @@ async function renderPVComp(){
       interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},tooltip:{
         backgroundColor:'#1a1d27',borderColor:'rgba(255,255,255,.1)',borderWidth:1,
-        titleColor:'#e8eaf0',bodyColor:'#7a7f94',padding:10}},
+        titleColor:'#e8eaf0',bodyColor:'#7a7f94',padding:10,
+        callbacks:{label:ctx=>` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString('es-CL')} kL`}
+      }},
       scales:{
-        yL:{position:'left',grid:{color:'rgba(255,255,255,.05)'},border:{display:false},
-          ticks:{color:'#7a7f94',font:{size:11},callback:v=>v.toLocaleString('es-CL')+' kL'}},
-        yR:{position:'right',grid:{display:false},border:{display:false},
-          ticks:{color:'#7a7f94',font:{size:11},callback:v=>'M$'+v.toLocaleString('es-CL')}},
-        x:{grid:{display:false},ticks:{color:'#7a7f94',font:{size:11}},border:{color:'rgba(255,255,255,.07)'}}
+        x:{grid:{display:false},ticks:{color:'#7a7f94',font:{size:11}},border:{color:'rgba(255,255,255,.07)'}},
+        y:{grid:{color:'rgba(255,255,255,.05)'},border:{display:false},
+          ticks:{color:'#7a7f94',font:{size:11},callback:v=>v.toLocaleString('es-CL')+' kL'}}
       }
     }
   });
 }
+
 
 // ── INIT ──────────────────────────────────────────────────────
 async function init() {

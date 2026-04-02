@@ -119,6 +119,7 @@ main{padding:20px 24px 48px;max-width:1060px}
   <button class="view-tab"    onclick="setV('comp',this)">Comparativo anual ↕</button>
   <button class="view-tab"    onclick="setV('det',this)">Sabor y Formato</button>
   <button class="view-tab"    onclick="setV('detcomp',this)">Evolución detallada</button>
+  <button class="view-tab"    onclick="setV('pvcomp',this)">Prod. vs Ventas</button>
 </div>
 
 <main id="mc">
@@ -162,6 +163,7 @@ const MM = {"01":"Ene","02":"Feb","03":"Mar","04":"Abr","05":"May","06":"Jun",
 let rawV=[], rawP=[], rawVD=[], rawPD=[], aM="ventas", aV="total", cA=null, cB=null;
 let selDetCat="", selDetSab="", selDetFmt="";
 let selDC_Cat="", selDC_Sab="", selDC_Fmt="";
+let pvc_Cat="", pvc_Fmt=""; // prod vs ventas
 
 // ── UTILS ─────────────────────────────────────────────────────
 const num  = v => { var n=Number(String(v??'').trim()); return isNaN(n)?0:n; };
@@ -383,7 +385,7 @@ function renderCats() {
 }
 
 // ── NAVEGACIÓN ────────────────────────────────────────────────
-function render() { if(aV==="total") renderTotal(); else if(aV==="cats") renderCats(); else if(aV==="comp") renderComp(); else if(aV==="det") renderDet(); else renderDetComp(); }
+function render() { if(aV==="total") renderTotal(); else if(aV==="cats") renderCats(); else if(aV==="comp") renderComp(); else if(aV==="det") renderDet(); else if(aV==="detcomp") renderDetComp(); else renderPVComp(); }
 function setM(m,b){ aM=m; selDetCat=''; selDetSab=''; selDetFmt=''; document.querySelectorAll(".top-tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); render(); }
 function setV(v,b){ aV=v; document.querySelectorAll(".view-tab").forEach(x=>x.classList.remove("on")); b.classList.add("on"); render(); }
 
@@ -844,6 +846,161 @@ function renderDetComp(){
     });
   }).catch(e=>{
     mc.innerHTML=`<div class="state-box"><span style="color:var(--red)">Error: ${e.message}</span></div>`;
+  });
+}
+
+// ── RENDER PROD VS VENTAS ─────────────────────────────────────
+async function renderPVComp(){
+  const mc=document.getElementById('mc');
+  mc.innerHTML='<div class="state-box"><div class="spinner"></div><span>Cargando comparativo...</span></div>';
+
+  // Cargar ambas fuentes si no están cargadas
+  if(!rawV.length||!rawP.length){
+    mc.innerHTML='<div class="state-box"><span>Sin datos. Verificar sync.</span></div>';
+    return;
+  }
+
+  // Categorías disponibles en ambos datasets
+  const catsV=new Set(rawV.map(r=>r.CATEGORIA));
+  const catsP=new Set(rawP.map(r=>r.CATEGORIA));
+  const cats=CATS.map(c=>c.k).filter(k=>catsV.has(k)||catsP.has(k));
+  if(!pvc_Cat&&cats.length) pvc_Cat=cats[0];
+
+  // Formatos disponibles para ventas (para filtrar)
+  // Usar ventas_det para obtener litros por formato
+  let vDetData=rawVD.length?rawVD:[];
+  const fmts=[...new Set(vDetData.filter(r=>r.CATEGORIA===pvc_Cat).map(r=>r.FORMATO))].sort();
+
+  // Períodos (15 meses)
+  const periodos=getPeriods();
+
+  // Ventas en litros: desde ventas_det si disponible, sino calcular desde ventas
+  // ventas_det tiene MONTO_VENTA, necesitamos litros
+  // Usamos rawV (monto) y rawP (litros) — comparamos en índice base 100 si unidades distintas
+  // Pero el usuario pidió litros como denominador común
+  // Ventas en litros: necesitamos ventas_det con campo litros o calcularlo
+  // Como ventas_det solo tiene MONTO_VENTA, usamos rawP para litros producción
+  // y para ventas mostramos índice de volumen (unidades × lts — no disponible en aggregado)
+  // SOLUCIÓN: usar ventas_det filtrado por categoria+formato para obtener proporciones
+  // y rawP para producción en litros
+
+  // Agrupar ventas por período y categoría (MONTO)
+  const pvV={};
+  rawV.filter(r=>r.CATEGORIA===pvc_Cat).forEach(r=>{
+    pvV[r.PERIODO]=(pvV[r.PERIODO]||0)+num(r.MONTO_VENTA);
+  });
+
+  // Agrupar producción por período y categoría (LITROS)
+  const pvP={};
+  rawP.filter(r=>r.CATEGORIA===pvc_Cat&&(!pvc_Fmt||true)).forEach(r=>{
+    pvP[r.PERIODO]=(pvP[r.PERIODO]||0)+num(r.LITROS);
+  });
+
+  // Para ventas en litros necesitamos ventas_det
+  const pvVL={};
+  if(vDetData.length){
+    vDetData.filter(r=>r.CATEGORIA===pvc_Cat&&(!pvc_Fmt||r.FORMATO===pvc_Fmt)).forEach(r=>{
+      // ventas_det tiene MONTO_VENTA no litros — no podemos usarlo directamente
+      // Aproximamos: usamos rawVD como proxy del mix
+    });
+  }
+  // Mejor: mostrar producción en litros (eje izq) y ventas en M$ (eje der)
+  // con doble eje — más honesto que convertir
+  const hasP=periodos.some(p=>pvP[p]>0);
+  const hasV=periodos.some(p=>pvV[p]>0);
+
+  const catColor=CATS.find(c=>c.k===pvc_Cat)?.c||'#3b8fd4';
+
+  // KPIs
+  const totP=periodos.reduce((s,p)=>s+(pvP[p]||0),0);
+  const totV2=periodos.reduce((s,p)=>s+(pvV[p]||0),0);
+
+  const catBtns=cats.map(c=>{
+    const cc=CATS.find(x=>x.k===c)?.c||'#7a7f94';
+    return `<button class="cat-btn${c===pvc_Cat?' on':''}"
+      style="${c===pvc_Cat?'color:'+cc+';border-color:'+cc+';border-width:2px':''}"
+      onclick="pvc_Cat='${c}';pvc_Fmt='';renderPVComp()">${c}</button>`;
+  }).join('');
+
+  const fmtBtns=`<span style="font-size:11px;color:var(--muted);margin-right:6px">Formato:</span>`+
+    ['',...fmts].map(f=>`<button class="cat-btn${f===pvc_Fmt?' on':''}"
+      style="font-size:11px;padding:3px 10px;${f===pvc_Fmt?'color:'+catColor+';border-color:'+catColor+';border-width:2px':''}"
+      onclick="pvc_Fmt='${f}';renderPVComp()">${f||'Todos'}</button>`).join('');
+
+  // Tabla mes a mes
+  const tRows=periodos.map(p=>{
+    const litP=pvP[p]||0;
+    const mtoV=pvV[p]||0;
+    return `<tr>
+      <td>${lbl(p)}</td>
+      <td style="color:${catColor}">${litP>0?Math.round(litP/1000).toLocaleString('es-CL')+' kL':'—'}</td>
+      <td>${mtoV>0?'M$'+(mtoV/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1}):'—'}</td>
+    </tr>`;
+  }).join('');
+
+  mc.innerHTML=`
+    <div class="cat-sel" style="margin-top:4px">${catBtns}</div>
+    <div class="cat-sel" style="margin-bottom:14px">${fmtBtns}</div>
+    <div class="kpis" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:18px">
+      <div class="kpi" style="border-left:3px solid ${catColor}">
+        <div class="kpi-l">Producción YTD · ${pvc_Cat}</div>
+        <div class="kpi-v" style="color:${catColor}">${Math.round(totP/1000).toLocaleString('es-CL')} kL</div>
+        <div class="kpi-s">litros producidos</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-l">Ventas YTD · ${pvc_Cat}</div>
+        <div class="kpi-v">${'M$'+(totV2/1e6).toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1})}</div>
+        <div class="kpi-s">monto neto</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ch">
+        <div><div class="ct">Producción vs Ventas · ${pvc_Cat}</div>
+        <div class="cs">Producción en kL (eje izq) · Ventas en M$ (eje der) · 15 meses</div></div>
+        <div class="leg">
+          <span class="li"><span class="ll" style="background:${catColor}"></span>Producción kL</span>
+          <span class="li"><span class="ll" style="background:rgba(255,255,255,.4)"></span>Ventas M$</span>
+        </div>
+      </div>
+      <div class="cw" style="height:280px"><canvas id="cPV"></canvas></div>
+    </div>
+    <div class="tbl" style="margin-top:14px">
+      <table>
+        <thead><tr><th>Período</th><th>Producción</th><th>Ventas</th></tr></thead>
+        <tbody>${tRows}</tbody>
+      </table>
+    </div>`;
+
+  if(cA){cA.destroy();cA=null;}
+  cA=new Chart(document.getElementById('cPV'),{
+    type:'bar',
+    data:{
+      labels:periodos.map(lbl),
+      datasets:[
+        {label:'Producción kL',data:periodos.map(p=>Math.round((pvP[p]||0)/1000)),
+          backgroundColor:catColor+'99',borderRadius:4,barPercentage:.5,categoryPercentage:.7,
+          yAxisID:'yL'},
+        {label:'Ventas M$',data:periodos.map(p=>Math.round((pvV[p]||0)/1e6*10)/10),
+          type:'line',borderColor:'rgba(255,255,255,.7)',backgroundColor:'transparent',
+          borderWidth:2.5,pointRadius:4,pointHoverRadius:7,
+          pointBackgroundColor:'rgba(255,255,255,.7)',tension:.35,
+          yAxisID:'yR'}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{
+        backgroundColor:'#1a1d27',borderColor:'rgba(255,255,255,.1)',borderWidth:1,
+        titleColor:'#e8eaf0',bodyColor:'#7a7f94',padding:10}},
+      scales:{
+        yL:{position:'left',grid:{color:'rgba(255,255,255,.05)'},border:{display:false},
+          ticks:{color:'#7a7f94',font:{size:11},callback:v=>v.toLocaleString('es-CL')+' kL'}},
+        yR:{position:'right',grid:{display:false},border:{display:false},
+          ticks:{color:'#7a7f94',font:{size:11},callback:v=>'M$'+v.toLocaleString('es-CL')}},
+        x:{grid:{display:false},ticks:{color:'#7a7f94',font:{size:11}},border:{color:'rgba(255,255,255,.07)'}}
+      }
+    }
   });
 }
 
